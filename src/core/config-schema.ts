@@ -194,6 +194,7 @@ export const FeishuAccountConfigSchema = z.object({
   reactionNotifications: ReactionNotificationModeSchema,
   threadSession: z.boolean().optional(),
   uat: UATConfigSchema,
+  ownerOnly: z.boolean().optional(),
 });
 
 // ---------------------------------------------------------------------------
