@@ -331,7 +331,10 @@ export class ToolClient {
     }
 
     // Owner 检查：非 owner 用户直接拒绝（从 uat-client.ts 迁移至此）
-    await assertOwnerAccessStrict(this.account, this.sdk, userOpenId);
+    // 当配置 ownerOnly: false 时，跳过 owner 检查，允许所有用户通过 OAuth 自授权后使用工具
+    if (this.account.config.ownerOnly !== false) {
+      await assertOwnerAccessStrict(this.account, this.sdk, userOpenId);
+    }
 
     // 预检：是否有已存储的 token
     const stored = await getStoredToken(this.account.appId, userOpenId);
