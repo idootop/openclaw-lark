@@ -34,12 +34,13 @@ description: |
 
 | 用户意图 | 工具 | action | 必填参数 | 强烈建议 | 常用可选 |
 |---------|------|--------|---------|---------|---------|
-| 新建待办 | feishu_task_task | create | summary | current_user_id（SenderId） | members, due, description, auth_type |
+| 新建待办 | feishu_task_task | create | summary | current_user_id（SenderId） | members, due, description, custom_fields, auth_type |
 | 查未完成任务 | feishu_task_task | list | - | completed=false | page_size, auth_type, agent_task_status |
 | 获取任务详情 | feishu_task_task | get | task_guid | - | auth_type |
 | 完成任务 | feishu_task_task | patch | task_guid, completed_at | - | auth_type |
 | 反完成任务 | feishu_task_task | patch | task_guid, completed_at="0" | - | auth_type |
 | 改截止时间 | feishu_task_task | patch | task_guid, due | - | auth_type |
+| 改难度/优先级等自定义字段 | feishu_task_task | patch | task_guid, custom_fields | - | auth_type |
 | 添加任务成员 | feishu_task_task | add_members | task_guid, members[] | - | auth_type |
 | 追加任务步骤记录 | feishu_task_task | append_steps | task_guid, idempotent_key, task_steps[] | task_steps[].timestamp 用秒级（10 位） | - |
 | 创建清单 | feishu_task_tasklist | create | name | - | members |
@@ -132,6 +133,61 @@ description: |
 | chat（群组） | editor/viewer | 整个群组获得权限 |
 
 **说明**：创建清单时，创建者自动成为 owner，无需在 members 中指定。
+
+### 6. 自定义字段 (custom_fields)
+
+`create` 与 `patch` 均支持 `custom_fields` 参数，用于设置/更新任务的自定义字段（如项目中的"难度""优先级"等）。每一项通过 `guid` 定位字段，并根据字段类型填写**恰好一个**值字段。
+
+**字段类型 → 值字段映射**：
+
+| 字段 type | 值字段 | 值类型 | 说明 |
+|----------|--------|-------|------|
+| `number` | `number_value` | number | 数字 |
+| `member` | `member_value` | `[{ id, type? }]` | 成员列表（id 为 open_id，type 支持 user/app，默认 user） |
+| `datetime` | `datetime_value` | string | **毫秒时间戳字符串**（注意：与任务的 `due.timestamp`、`start.timestamp` 的 ISO 格式不一致） |
+| `single_select` | `single_select_value` | string | 选项的 guid |
+| `multi_select` | `multi_select_value` | `string[]` | 选项 guid 的数组 |
+| `text` | `text_value` | string | 文本 |
+
+**重要约束**：
+- `guid` 与 `single_select_value`/`multi_select_value` 里的选项 guid 必须**预先从飞书任务清单配置里获取**，模型不要自己编造。
+- 每一项只填"该字段类型对应的那一个"值字段；同时填多个或全不填会被飞书 API 拒绝。
+- `patch` 时工具会自动把 `custom_fields` 加入 `update_fields`，无需手动处理。
+- 工具层不做字段类型校验，直接透传；类型不匹配时由飞书 API 返回错误。
+
+**创建任务并设置自定义字段（单选 + 多选 + 文本混合示例）**：
+
+```json
+{
+  "action": "create",
+  "summary": "接入 AI 总结能力",
+  "description": "目标：在群内一键总结聊天记录",
+  "tasklists": [
+    {
+      "tasklist_guid": "xxxxx",
+      "section_guid": "xxxxx"
+    }
+  ],
+  "custom_fields": [
+    { "guid": "<tags-field-guid>", "multi_select_value": ["<tag1-guid>", "<tag2-guid>"] },
+    { "guid": "<note-field-guid>", "text_value": "来自飞书群讨论" }
+  ]
+}
+```
+
+**仅更新任务的自定义字段（例如把优先级从中改为高）**：
+
+```json
+{
+  "action": "patch",
+  "task_guid": "任务的guid",
+  "custom_fields": [
+    { "guid": "<note-field-guid>", "text_value": "来自飞书群讨论" }
+  ]
+}
+```
+
+**说明**：工具会把 `custom_fields` 自动追加进 `update_fields`（飞书任务 API 要求），所以只传 `custom_fields` 就能生效，其他未传字段不会被改动。
 
 ---
 

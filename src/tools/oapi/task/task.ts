@@ -35,6 +35,69 @@ import { rawLarkRequest } from '../../../core/raw-request';
 // Schema
 // ---------------------------------------------------------------------------
 
+// 自定义字段（custom_fields）
+// 每项由 guid 定位一个自定义字段，配合下面 6 种值字段中的"恰好一个"来承载值。
+// 值字段与字段类型的一一对应关系（飞书任务 v2 API）：
+//   - number         → number_value          （数字）
+//   - member         → member_value          （人员列表）
+//   - datetime       → datetime_value        （毫秒时间戳字符串，注意与 due.timestamp 的 ISO 格式不同）
+//   - single_select  → single_select_value   （选项 guid）
+//   - multi_select   → multi_select_value    （选项 guid 数组）
+//   - text           → text_value            （文本）
+// guid 与选项 guid 需预先在飞书任务清单配置中拿到，工具层不做字段类型校验，直接透传给 API。
+const CustomFieldSchema = Type.Object({
+  guid: Type.String({
+    description: '自定义字段的 guid（预先在飞书任务清单配置里获取）',
+  }),
+  number_value: Type.Optional(
+    Type.Number({
+      description: '数字类型字段的值（当字段 type 为 number 时使用）',
+    }),
+  ),
+  member_value: Type.Optional(
+    Type.Array(
+      Type.Object({
+        id: Type.String({
+          description: '成员 ID（默认 open_id）',
+        }),
+        type: Type.Optional(StringEnum(['user', 'app'])),
+        name: Type.Optional(Type.String({
+          description: '成员名称（当字段 type 为 user 时使用）',
+        })),
+      }),
+      {
+        description: '成员类型字段的值（当字段 type 为 member 时使用）',
+      },
+    ),
+  ),
+  datetime_value: Type.Optional(
+    Type.String({
+      description:
+        '日期时间类型字段的值，毫秒时间戳字符串，例如 "1740545400000"（当字段 type 为 datetime 时使用）',
+    }),
+  ),
+  single_select_value: Type.Optional(
+    Type.String({
+      description: '单选类型字段的选项 guid（当字段 type 为 single_select 时使用）',
+    }),
+  ),
+  multi_select_value: Type.Optional(
+    Type.Array(Type.String(), {
+      description: '多选类型字段的选项 guid 列表（当字段 type 为 multi_select 时使用）',
+    }),
+  ),
+  text_value: Type.Optional(
+    Type.String({
+      description: '文本类型字段的值（当字段 type 为 text 时使用）',
+    }),
+  ),
+});
+
+const CustomFieldsSchema = Type.Array(CustomFieldSchema, {
+  description:
+    '自定义字段列表。每项用 guid 定位字段，并根据字段类型填写 number_value / member_value / datetime_value / single_select_value / multi_select_value / text_value 中的一个。guid 与选项 guid 需预先从飞书任务清单配置获取。',
+});
+
 const FeishuTaskTaskSchema = Type.Union([
   // CREATE
   Type.Object({
@@ -114,6 +177,7 @@ const FeishuTaskTaskSchema = Type.Union([
         },
       ),
     ),
+    custom_fields: Type.Optional(CustomFieldsSchema),
     auth_type: Type.Optional(
       StringEnum(['tenant', 'user'], {
         description:
@@ -254,6 +318,7 @@ const FeishuTaskTaskSchema = Type.Union([
         description: '新的重复规则（RRULE 格式）',
       }),
     ),
+    custom_fields: Type.Optional(CustomFieldsSchema),
     auth_type: Type.Optional(
       StringEnum(['tenant', 'user'], {
         description: '授权类型，默认 user。',
@@ -331,6 +396,20 @@ const FeishuTaskTaskSchema = Type.Union([
 // Params type
 // ---------------------------------------------------------------------------
 
+type CustomFieldValue = {
+  guid: string;
+  number_value?: number;
+  member_value?: Array<{
+    id: string;
+    type?: 'user' | 'app';
+    name?: string;
+  }>;
+  datetime_value?: string;
+  single_select_value?: string;
+  multi_select_value?: string[];
+  text_value?: string;
+};
+
 type FeishuTaskTaskParams =
   | {
     action: 'create';
@@ -355,6 +434,7 @@ type FeishuTaskTaskParams =
       tasklist_guid: string;
       section_guid?: string;
     }>;
+    custom_fields?: CustomFieldValue[];
     auth_type?: 'tenant' | 'user';
     user_id_type?: 'open_id' | 'union_id' | 'user_id';
   }
@@ -396,6 +476,7 @@ type FeishuTaskTaskParams =
       role?: 'assignee' | 'follower';
     }>;
     repeat_rule?: string;
+    custom_fields?: CustomFieldValue[];
     auth_type?: 'tenant' | 'user';
     user_id_type?: 'open_id' | 'union_id' | 'user_id';
   }
@@ -438,7 +519,7 @@ export function registerFeishuTaskTaskTool(api: OpenClawPluginApi): void {
       name: 'feishu_task_task',
       label: 'Feishu Task Management',
       description:
-        "【以用户或应用身份】飞书任务管理工具。用于创建、查询、更新任务。Actions: create（创建任务）, get（获取任务详情）, list（查询任务列表，仅返回我负责的任务）, patch（更新任务）, add_members（添加任务成员）, append_steps（追加任务步骤记录）。时间参数使用ISO 8601 / RFC 3339 格式（包含时区），例如 '2024-01-01T00:00:00+08:00'。支持通过 auth_type 参数切换用户(user)或应用(tenant)身份；append_steps 固定使用应用身份。",
+        "【以用户或应用身份】飞书任务管理工具。用于创建、查询、更新任务。Actions: create（创建任务）, get（获取任务详情）, list（查询任务列表，仅返回我负责的任务）, patch（更新任务）, add_members（添加任务成员）, append_steps（追加任务步骤记录）。时间参数使用ISO 8601 / RFC 3339 格式（包含时区），例如 '2024-01-01T00:00:00+08:00'。支持通过 auth_type 参数切换用户(user)或应用(tenant)身份；append_steps 固定使用应用身份。create 与 patch 支持通过 custom_fields 设置自定义字段（难度、优先级、数字、成员、日期、单选、多选、文本），字段 guid 与选项 guid 需预先从飞书任务清单配置获取。",
       parameters: FeishuTaskTaskSchema,
       async execute(_toolCallId: string, params: unknown) {
         const p = params as FeishuTaskTaskParams;
@@ -494,6 +575,7 @@ export function registerFeishuTaskTaskTool(api: OpenClawPluginApi): void {
               if (p.members) taskData.members = p.members;
               if (p.repeat_rule) taskData.repeat_rule = p.repeat_rule;
               if (p.tasklists) taskData.tasklists = p.tasklists;
+              if (p.custom_fields) taskData.custom_fields = p.custom_fields;
 
               const authType = p.auth_type || 'user';
               const res = await client.invoke(
@@ -665,6 +747,7 @@ export function registerFeishuTaskTaskTool(api: OpenClawPluginApi): void {
 
               if (p.members) updateData.members = p.members;
               if (p.repeat_rule) updateData.repeat_rule = p.repeat_rule;
+              if (p.custom_fields) updateData.custom_fields = p.custom_fields;
 
               // Build update_fields list (required by Task API)
               const updateFields = Object.keys(updateData);
